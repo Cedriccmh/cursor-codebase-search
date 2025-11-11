@@ -38,6 +38,7 @@
     "@anysphere/file-service": "0.0.0-1a538476",
     "@modelcontextprotocol/sdk": "^0.5.0",
     "@types/cli-progress": "^3.11.6",
+    "async-mutex": "^0.5.0",
     "chokidar": "^3.5.3",
     "cli-progress": "^3.12.0",
     "dotenv": "^16.4.7",

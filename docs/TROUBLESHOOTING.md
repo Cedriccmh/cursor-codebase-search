@@ -161,7 +161,7 @@ Registers Tools:
    ```
    /mcp
    ```
-3. **Verify cometix-indexer is listed and connected**
+3. **Verify mcp-cursearch is listed and connected**
 
 ### To test the tools:
 

@@ -34,7 +34,7 @@ export async function createMcpServer(server: any, ctx: ServerContext): Promise<
       tools: [
         {
           name: "codebase_search",
-          description: "Searches the active workspace's indexed codebase to find code snippets most relevant to a natural language query. This is a semantic search tool, so the query should describe the desired functionality or concept. For best results, use the user's exact phrasing for the `query`, as their specific wording often contains valuable semantic cues. If the search should be limited to specific files or directories, use the `paths_include_glob` and `paths_exclude_glob` parameters to scope the search. NOTE: The user must first activate a workspace using the CLI command 'cometix-indexer index-activate <workspace-path>' before this tool can be used.",
+          description: "Searches the active workspace's indexed codebase to find code snippets most relevant to a natural language query. This is a semantic search tool, so the query should describe the desired functionality or concept. For best results, use the user's exact phrasing for the `query`, as their specific wording often contains valuable semantic cues. If the search should be limited to specific files or directories, use the `paths_include_glob` and `paths_exclude_glob` parameters to scope the search. NOTE: The user must first activate a workspace using the CLI command 'mcp-cursearch index-activate <workspace-path>' before this tool can be used.",
           inputSchema: codebaseSearchInputJsonSchema,
         },
       ],

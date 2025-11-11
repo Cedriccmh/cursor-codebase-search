@@ -269,7 +269,7 @@ export function createCodeSearcher(ctx: { authToken: string; baseUrl: string }, 
     if (!workspacePath) {
       throw new Error(
         "No active workspace. Please run:\n" +
-        "  cometix-indexer index-activate <workspace-path>\n" +
+        "  mcp-cursearch index-activate <workspace-path>\n" +
         "to activate a workspace first."
       );
     }
@@ -285,7 +285,7 @@ export function createCodeSearcher(ctx: { authToken: string; baseUrl: string }, 
     if (!st.codebaseId || !st.pathKey) {
       throw new Error(
         "Active workspace not indexed yet. Please run:\n" +
-        "  cometix-indexer index-activate " + workspacePath
+        "  mcp-cursearch index-activate " + workspacePath
       );
     }
     const repositoryPb = {

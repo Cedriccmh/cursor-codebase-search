@@ -10,9 +10,11 @@ import { V1MasterKeyedEncryptionScheme, decryptPathToRelPosix, encryptPathWindow
 import { ensureIndexCreated, fastRepoInitHandshakeV2, fastRepoSyncComplete, fastUpdateFileV2, syncMerkleSubtreeV2 } from "../client/cursorApi.js";
 import { loadWorkspaceState, saveWorkspaceState, WorkspaceState, setRuntimeCodebaseId, getRuntimeCodebaseId } from "./stateManager.js";
 import { startFileWatcher } from "./fileWatcher.js";
-import { logger } from "../utils/logger.js";
+import { getLogger } from "../utils/logger.js";
 
 export type IndexerContext = { authToken: string; baseUrl: string };
+
+const indexLogger = getLogger("Indexer");
 
 export function createRepositoryIndexer(ctx: IndexerContext) {
   async function buildAncestorSpline(relPath: string) {
@@ -52,11 +54,11 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
   }
 
   async function initialHandshake(merkle: MerkleClient, st: WorkspaceState, pathKey: string, baseUrl: string, authToken: string, repoName: string) {
-    console.log(`🤝 [DEBUG] initialHandshake called with pathKey: ${pathKey.substring(0, 20)}...`);
+    indexLogger.debug("initialHandshake called", { pathKeyPrefix: pathKey.substring(0, 20) });
     const rootHash = await merkle.getSubtreeHash("");
     const simhash = Array.from(await merkle.getSimhash());
     const pathKeyHash = sha256Hex(pathKey);
-    console.log(`🤝 [DEBUG] Computed pathKeyHash: ${pathKeyHash}`);
+    indexLogger.debug("Computed pathKeyHash", { pathKeyHash });
     const repositoryPb = createRepositoryPb(st.workspacePath, st.orthogonalTransformSeed!, repoName);
     const req = {
       repository: repositoryPb,
@@ -84,26 +86,26 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
 
     // Check if local state has pathKey stored
     const hasLocalPathKey = !!(st.pathKey && st.pathKeyHash);
-    console.log(`🔍 [DEBUG] isExistingCodebase: ${isExistingCodebase}, hasLocalPathKey: ${hasLocalPathKey}`);
-    console.log(`🔍 [DEBUG] st.pathKey: ${st.pathKey ? st.pathKey.substring(0, 20) + '...' : 'NONE'}`);
-    console.log(`🔍 [DEBUG] st.pathKeyHash: ${st.pathKeyHash || 'NONE'}`);
+    indexLogger.debug("Handshake state", { isExistingCodebase, hasLocalPathKey });
+    indexLogger.debug("Local pathKey", { prefix: st.pathKey ? st.pathKey.substring(0, 20) : null });
+    indexLogger.debug("Local pathKeyHash", { pathKeyHash: st.pathKeyHash || null });
 
     // If server returned an existing codebase but we don't have a local pathKey,
     // this indicates a pathKey mismatch risk (e.g., after deleting state file).
     // Force creation of a new codebaseId to avoid decryption errors.
     if (isExistingCodebase && !hasLocalPathKey) {
-      console.warn("⚠️  Server returned existing codebase but local pathKey is missing.");
-      console.warn("   This indicates a potential pathKey mismatch (e.g., state file was deleted).");
-      console.warn("   Forcing creation of new codebaseId to avoid path decryption errors...");
-      console.warn(`   🔑 [DEBUG] Current pathKey being used: ${pathKey.substring(0, 20)}...`);
+      indexLogger.warn("Server returned existing codebase but local pathKey is missing");
+      indexLogger.warn("Potential pathKey mismatch; local state missing", { reason: "state file deleted?" });
+      indexLogger.warn("Forcing creation of new codebaseId to avoid path decryption errors");
+      indexLogger.debug("Current pathKey prefix", { prefix: pathKey.substring(0, 20) });
 
       // Modify repoName with timestamp and random suffix to force new codebaseId
       const timestamp = Date.now();
       const randomSuffix = Math.random().toString(36).slice(2, 8);
       const newRepoName = `${repoName}-${timestamp}-${randomSuffix}`;
 
-      console.log(`   Original repoName: ${repoName}`);
-      console.log(`   Modified repoName: ${newRepoName}`);
+      indexLogger.debug("Original repoName", { repoName });
+      indexLogger.debug("Modified repoName", { newRepoName });
 
       // Create new repository object with modified repoName
       const newRepositoryPb = createRepositoryPb(st.workspacePath, st.orthogonalTransformSeed!, newRepoName);
@@ -127,8 +129,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
         throw new Error("Failed to create new codebase_id with modified repoName");
       }
 
-      console.log(`✅ Successfully created new codebaseId: ${newCodebaseId}`);
-      console.log("   This new codebase will use the current pathKey for all files.");
+      indexLogger.info("Created new codebase", { codebaseId: newCodebaseId });
+      indexLogger.info("New codebase will use current pathKey for all files");
 
       // Return the new codebaseId, modified repositoryPb, and modified repoName
       return {
@@ -256,8 +258,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       }).catch(() => {
         // Additional context logging after all retries failed
         // The detailed error has already been logged by withRetrySemaphore
-        logger.error(
-          `⚠️  Skipping file and continuing with next file: ${path.basename(abs)}`
+        indexLogger.error(
+          `Skipping file and continuing with next file: ${path.basename(abs)}`
         );
         // Continue processing other files despite this failure
       }))
@@ -266,6 +268,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
   }
 
   async function runEnsureAndSyncComplete(baseUrl: string, authToken: string, repositoryPb: any, codebaseId: string, simhash: number[], pathKeyHash: string) {
+    indexLogger.debug("Ensure index & sync", { codebaseId });
+
     await ensureIndexCreated(baseUrl, authToken, repositoryPb);
     await fastRepoSyncComplete(baseUrl, authToken, {
       codebases: [
@@ -279,7 +283,10 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
         },
       ],
     });
+    indexLogger.debug("Sync complete recorded", { codebaseId });
+
   }
+
 
   async function incrementalSync(
     workspacePath: string,
@@ -290,6 +297,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
     authToken: string,
     orthogonalTransformSeed: number,
   ) {
+    indexLogger.info("Incremental sync started", { workspacePath, codebaseId });
+
     const queue: string[] = ["."];
     const visited = new Set<string>();
     const r = new Set<string>();
@@ -407,8 +416,10 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
     }
 
     const changed = Array.from(new Set<string>([...Array.from(r), ...Array.from(s)]));
+    indexLogger.info("Incremental sync result", { changed: changed.length });
     return changed;
   }
+
 
   function chunkArray<T>(arr: T[], size: number): T[][] {
     const out: T[][] = [];
@@ -419,19 +430,22 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
   const startedWatchers = new Set<string>();
   const scheduled = new Set<string>();
 
+
   async function indexProject(params: { workspacePath: string; verbose?: boolean }) {
     const workspacePath = path.resolve(params.workspacePath);
     let st = await loadWorkspaceState(workspacePath);
+    indexLogger.info("Indexing started", { workspacePath });
+
     if (!st.orthogonalTransformSeed) {
       st.orthogonalTransformSeed = Math.floor(Math.random() * Number.MAX_SAFE_INTEGER);
     }
     let pathKey = st.pathKey;
-    console.log(`🔍 [DEBUG] Loaded pathKey from state: ${pathKey ? pathKey.substring(0, 20) + '...' : 'NOT FOUND'}`);
+    indexLogger.debug("Loaded pathKey from state", { prefix: pathKey ? pathKey.substring(0, 20) : null });
     if (!pathKey) {
       pathKey = genPathKey();
-      console.log(`🔑 [DEBUG] Generated NEW pathKey: ${pathKey.substring(0, 20)}...`);
+      indexLogger.info("Generated new pathKey", { prefix: pathKey.substring(0, 20) });
     }
-    console.log(`🔑 [DEBUG] PathKey hash: ${sha256Hex(pathKey)}`);
+    indexLogger.debug("PathKey hash", { pathKeyHash: sha256Hex(pathKey) });
     const scheme = new V1MasterKeyedEncryptionScheme(pathKey);
     // embeddableFilesPath is fixed under per-project directory
     const projectDir = (await import("./stateManager.js" as any)).getWorkspaceProjectDir(workspacePath);
@@ -450,10 +464,14 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       try { const s = fs.statSync(abs); return s.isFile() && s.size <= DEFAULTS.FILE_SIZE_LIMIT_BYTES; } catch { return false; }
     });
     const batches = chunkArray(filtered, DEFAULTS.INITIAL_UPLOAD_MAX_FILES);
+    indexLogger.info("Discovered files", { discovered: allFilesAbs.length, filtered: filtered.length });
+    indexLogger.debug("Prepared upload batches", { batches: batches.length, batchSizeMax: DEFAULTS.INITIAL_UPLOAD_MAX_FILES });
+
     // Use stable repoName for consistent server mapping; persist it in state
     const repoName = st.repoName || `local-${crypto.createHash("sha256").update(workspacePath).digest("hex").slice(0, 12)}`;
 
     // Perform initial handshake ONCE before processing batches
+
     // This ensures all batches use the same codebaseId
     const { codebaseId, repositoryPb, simhash, pathKeyHash, repoName: finalRepoName } = await initialHandshake(
       merkle,
@@ -464,16 +482,18 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       repoName,
     );
 
+    indexLogger.info("Handshake complete", { codebaseId, repoName: finalRepoName });
+
     // Validate pathKey matches for this codebaseId
     const validation = validateCodebasePathKey(codebaseId, pathKey!, st);
     if (!validation.isValid) {
-      console.error(validation.warning);
+      indexLogger.error(validation.warning ?? "PathKey mismatch detected.");
       throw new Error("PathKey mismatch detected. Cannot proceed with indexing.");
     }
 
     // CRITICAL FIX: Save pathKey immediately after handshake to ensure it's persisted
     // This prevents pathKey mismatch on subsequent indexing operations
-    console.log(`💾 [DEBUG] Saving pathKey immediately after handshake...`);
+    indexLogger.info("Saving pathKey immediately after handshake");
     st = {
       ...st,
       workspacePath,
@@ -485,7 +505,7 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       repoOwner: st.repoOwner || "local-user",
     };
     await saveWorkspaceState(st);
-    console.log(`✅ [DEBUG] PathKey saved successfully after handshake`);
+    indexLogger.info("PathKey saved successfully after handshake");
 
     // Now process all batches using the same codebaseId
     const encryptedToPlainPath: Record<string, string> = {};
@@ -495,6 +515,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
     // Create progress bar
     const totalFiles = filtered.length;
     const totalBatches = batches.length;
+    indexLogger.info("Starting upload", { totalFiles, totalBatches });
+
     const progressBar = new cliProgress.SingleBar({
       format: '📤 Uploading |{bar}| {percentage}% | {value}/{total} files | Batch {batch}/{totalBatches} | ETA: {eta}s',
       barCompleteChar: '\u2588',
@@ -508,6 +530,8 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
 
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
+      indexLogger.debug("Uploading batch", { batchNum: i + 1, batchSize: batch.length });
+
       const batchNum = i + 1;
 
       // Update progress bar with current batch
@@ -531,16 +555,18 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       await runEnsureAndSyncComplete(ctx.baseUrl, ctx.authToken, repositoryPb, codebaseId, simhash, pathKeyHash);
       setRuntimeCodebaseId(workspacePath, codebaseId);
     }
-    
+
     progressBar.stop();
-    console.log("✅ Upload complete!");
+
+    indexLogger.info("Upload complete", { uploaded: totalUploaded, batches: batches.length });
+
 
     // Calculate final pathKeyHash for storage
     const finalPathKeyHash = sha256Hex(pathKey!);
-    console.log(`💾 [DEBUG] Saving state with pathKey: ${pathKey!.substring(0, 20)}...`);
-    console.log(`💾 [DEBUG] Saving state with pathKeyHash: ${finalPathKeyHash}`);
-    console.log(`💾 [DEBUG] Saving state with codebaseId: ${codebaseId}`);
-    console.log(`💾 [DEBUG] Saving state with repoName: ${finalRepoName}`);
+    indexLogger.debug("Saving state", { pathKeyPrefix: pathKey!.substring(0, 20) });
+    indexLogger.debug("Saving state pathKeyHash", { pathKeyHash: finalPathKeyHash });
+    indexLogger.debug("Saving state codebaseId", { codebaseId });
+    indexLogger.debug("Saving state repoName", { repoName: finalRepoName });
 
     st = {
       ...st,
@@ -553,9 +579,11 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
       pendingChanges: false,
     };
     await saveWorkspaceState(st);
-    console.log(`✅ [DEBUG] State saved successfully`);
+    indexLogger.info("State saved successfully");
     // start watcher and schedule auto-sync
     if (!startedWatchers.has(workspacePath)) {
+    indexLogger.debug("State saved", { codebaseId, repoName: finalRepoName });
+
       startFileWatcher(workspacePath);
       startedWatchers.add(workspacePath);
     }
@@ -574,12 +602,16 @@ export function createRepositoryIndexer(ctx: IndexerContext) {
     if (!runtimeId || !st.pathKey || !st.orthogonalTransformSeed) return;
     // Prime runtime cache if needed
     if (!getRuntimeCodebaseId(workspacePath) && runtimeId) setRuntimeCodebaseId(workspacePath, runtimeId);
+    indexLogger.debug("Auto-sync check", { workspacePath, pendingChanges: st.pendingChanges, runtimeIdPresent: !!runtimeId });
+
     const merkle = await merkleBuild(workspacePath);
     if (!st.pendingChanges) return;
     const scheme = new V1MasterKeyedEncryptionScheme(st.pathKey);
     const changed = await incrementalSync(workspacePath, merkle, runtimeId, scheme, ctx.baseUrl, ctx.authToken, st.orthogonalTransformSeed);
     if (changed.length === 0) return;
     // upload changed files
+    indexLogger.debug("Auto-sync changed files", { count: changed.length });
+
     await uploadFilesChunk(
       changed.map((rp) => path.join(workspacePath, rp)),
       workspacePath,

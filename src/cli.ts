@@ -2,12 +2,13 @@
 import path from "path";
 import { resolveAuthAndBaseUrlFromCliAndEnv } from "./utils/env.js";
 import { createRepositoryIndexer } from "./services/repositoryIndexer.js";
-import { 
-  loadWorkspaceState, 
-  listIndexedWorkspaces, 
-  getActiveWorkspace, 
-  setActiveWorkspace, 
-  clearActiveWorkspace 
+import { logger } from "./utils/logger.js";
+import {
+  loadWorkspaceState,
+  listIndexedWorkspaces,
+  getActiveWorkspace,
+  setActiveWorkspace,
+  clearActiveWorkspace
 } from "./services/stateManager.js";
 
 async function main() {
@@ -19,7 +20,8 @@ async function main() {
     process.exit(0);
   }
 
-  const { authToken, baseUrl } = resolveAuthAndBaseUrlFromCliAndEnv(args.slice(1));
+  const { authToken, baseUrl, logLevel } = resolveAuthAndBaseUrlFromCliAndEnv(args.slice(1));
+  if (logLevel) logger.setLevel(logLevel);
 
   try {
     switch (command) {
@@ -129,12 +131,12 @@ async function handleList() {
 
   if (indexed.length === 0) {
     console.log("No indexed workspaces found.");
-    console.log('Run "cometix-indexer index-activate <path>" to index a workspace.');
+    console.log('Run "mcp-cursearch index-activate <path>" to index a workspace.');
     return;
   }
 
   console.log("Indexed workspaces:\n");
-  
+
   for (const workspacePath of indexed) {
     const state = await loadWorkspaceState(workspacePath);
     const isActive = workspacePath === active;
@@ -148,7 +150,7 @@ async function handleList() {
 
 async function handleDeactivate() {
   const active = await getActiveWorkspace();
-  
+
   if (!active) {
     console.log("No active workspace.");
     return;
@@ -161,16 +163,16 @@ async function handleDeactivate() {
 async function handleStatus(args: string[]) {
   // Extract workspace path or use active
   const workspacePath = args.find(arg => !arg.startsWith("--"));
-  
+
   let targetPath: string | null;
-  
+
   if (workspacePath) {
     targetPath = path.resolve(workspacePath);
   } else {
     targetPath = await getActiveWorkspace();
     if (!targetPath) {
       console.error("Error: No active workspace and no path specified");
-      console.error("Usage: cometix-indexer status [workspace-path]");
+      console.error("Usage: mcp-cursearch status [workspace-path]");
       process.exit(1);
     }
   }
@@ -181,7 +183,7 @@ async function handleStatus(args: string[]) {
 
   console.log(`Workspace: ${targetPath}`);
   console.log(`Status: ${isActive ? "Active" : "Inactive"}`);
-  
+
   if (state.codebaseId) {
     console.log(`CodebaseId: ${state.codebaseId}`);
     console.log(`Indexed: Yes`);
